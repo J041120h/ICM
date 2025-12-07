@@ -129,6 +129,7 @@ function task2_metronomic
     title('Free VEGF – Metronomic, NO Ab extravasation');
     xlabel('Time (days)'); ylabel('[VEGF] (pM)');
     legend({'Rest of body','Blood','Tumor'}, 'Location','best');
+    ylim([0 220])
 
     subplot(3,2,2);
     plot(t_Ex_days, Y_Ex(:,n.VEGF_r), '-',  ...
@@ -137,6 +138,7 @@ function task2_metronomic
     title('Free VEGF – Metronomic, WITH Ab extravasation');
     xlabel('Time (days)'); ylabel('[VEGF] (pM)');
     legend({'Rest of body','Blood','Tumor'}, 'Location','best');
+    ylim([0 220])
 
     subplot(3,2,3);
     plot(t_noEx_days, Y_noEx(:,n.Ab_r), '-',  ...
