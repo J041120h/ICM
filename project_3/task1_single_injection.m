@@ -117,7 +117,7 @@ plot(t_noEx_days, Y_noEx(:,n.VEGF_r), '-',  ...
 title('Free VEGF – NO Ab extravasation');
 xlabel('Time (days)'); ylabel('Free VEGF (pM)');
 legend({'Normal tissue','Blood','Tumor'}, 'Location','best');
-ylim([0 200]);
+ylim([0 220]);
 
 subplot(3,2,2);
 plot(t_Ex_days, Y_Ex(:,n.VEGF_r), '-', ...
