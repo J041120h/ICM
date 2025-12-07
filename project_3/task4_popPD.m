@@ -8,11 +8,11 @@ function task4_popPD
 %   - No antibody extravasation (AbEx = 0)
 %   - With antibody extravasation (AbEx = 1)
 %
-% For each of the 4 scenarios, generate one 3x5 multipanel figure:
-%   Rows:   blood, tumor, rest of body
-%   Cols:   VEGF, VEGFR2, VEGF–VEGFR2, Ab, VEGF–Ab
+% For each of the 4 scenarios, generate one 5x3 multipanel figure:
+%   Rows:   VEGF, VEGFR2, VEGF–VEGFR2, Ab, VEGF–Ab
+%   Cols:   Blood, Tumor, Rest of body
 %
-% Total: 4 figures × (3*5 panels) = 60 subplots.
+% Total: 4 figures × (5*3 panels) = 60 subplots.
 
     clearvars -except task4_popPD;
     clc;
@@ -159,7 +159,7 @@ function task4_popPD
     lw_ind  = 0.4;   % individual patients
     lw_mean = 2.0;   % population mean
 
-    %% Loop over each scenario and generate one 3x5 figure
+    %% Loop over each scenario and generate one 5x3 figure
     for sIdx = 1:numel(scenarios)
         scn = scenarios(sIdx);
         fprintf('Running scenario %d/%d: %s\n', sIdx, numel(scenarios), scn.label);
@@ -254,101 +254,100 @@ function task4_popPD
             VEGFAb_r_all(:,i)     = Y_i(:, n.VEGFAb_r);
         end
 
-        %% === Plot: 3 (compartments) × 5 (molecules) multipanel ===
+        %% === Plot: 5 (molecules) × 3 (compartments) multipanel ===
         fig = figure('Visible','off');
-        fig.Position = [100 100 1600 900];
+        fig.Position = [100 100 1600 1000];
 
-        % Row labels for compartments
-        rowNames = {'Blood', 'Tumor', 'Rest of body'};
-
-        % ----- Row 1: Blood -----
-        subplot(3,5,1);
-        plot_panel(t_days, VEGF_b_all,   lw_ind, lw_mean);
+        % Row 1: VEGF (Blood, Tumor, Rest)
+        subplot(5,3,1);
+        plot_panel(t_days, VEGF_b_all, lw_ind, lw_mean);
         title('VEGF – Blood');
         ylabel('[VEGF]_b (pM)');
         xlabel('Time (days)');
 
-        subplot(3,5,2);
-        plot_panel(t_days, VEGFR2_b_all, lw_ind, lw_mean);
-        title('VEGFR2 – Blood');
-        ylabel('[VEGFR2]_b (pM)');
-        xlabel('Time (days)');
-
-        subplot(3,5,3);
-        plot_panel(t_days, VEGFVEGFR2_b_all, lw_ind, lw_mean);
-        title('VEGF–VEGFR2 – Blood');
-        ylabel('[VEGF–VEGFR2]_b (pM)');
-        xlabel('Time (days)');
-
-        subplot(3,5,4);
-        plot_panel(t_days, Ab_b_all, lw_ind, lw_mean);
-        title('Ab – Blood');
-        ylabel('[Ab]_b (pM)');
-        xlabel('Time (days)');
-
-        subplot(3,5,5);
-        plot_panel(t_days, VEGFAb_b_all, lw_ind, lw_mean);
-        title('VEGF–Ab – Blood');
-        ylabel('[VEGF–Ab]_b (pM)');
-        xlabel('Time (days)');
-
-        % ----- Row 2: Tumor -----
-        subplot(3,5,6);
+        subplot(5,3,2);
         plot_panel(t_days, VEGF_t_all, lw_ind, lw_mean);
         title('VEGF – Tumor');
         ylabel('[VEGF]_t (pM)');
         xlabel('Time (days)');
 
-        subplot(3,5,7);
-        plot_panel(t_days, VEGFR2_t_all, lw_ind, lw_mean);
-        title('VEGFR2 – Tumor');
-        ylabel('[VEGFR2]_t (pM)');
-        xlabel('Time (days)');
-
-        subplot(3,5,8);
-        plot_panel(t_days, VEGFVEGFR2_t_all, lw_ind, lw_mean);
-        title('VEGF–VEGFR2 – Tumor');
-        ylabel('[VEGF–VEGFR2]_t (pM)');
-        xlabel('Time (days)');
-
-        subplot(3,5,9);
-        plot_panel(t_days, Ab_t_all, lw_ind, lw_mean);
-        title('Ab – Tumor');
-        ylabel('[Ab]_t (pM)');
-        xlabel('Time (days)');
-
-        subplot(3,5,10);
-        plot_panel(t_days, VEGFAb_t_all, lw_ind, lw_mean);
-        title('VEGF–Ab – Tumor');
-        ylabel('[VEGF–Ab]_t (pM)');
-        xlabel('Time (days)');
-
-        % ----- Row 3: Rest of body -----
-        subplot(3,5,11);
+        subplot(5,3,3);
         plot_panel(t_days, VEGF_r_all, lw_ind, lw_mean);
         title('VEGF – Rest of body');
         ylabel('[VEGF]_r (pM)');
         xlabel('Time (days)');
 
-        subplot(3,5,12);
+        % Row 2: VEGFR2 (Blood, Tumor, Rest)
+        subplot(5,3,4);
+        plot_panel(t_days, VEGFR2_b_all, lw_ind, lw_mean);
+        title('VEGFR2 – Blood');
+        ylabel('[VEGFR2]_b (pM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,5);
+        plot_panel(t_days, VEGFR2_t_all, lw_ind, lw_mean);
+        title('VEGFR2 – Tumor');
+        ylabel('[VEGFR2]_t (pM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,6);
         plot_panel(t_days, VEGFR2_r_all, lw_ind, lw_mean);
         title('VEGFR2 – Rest of body');
         ylabel('[VEGFR2]_r (pM)');
         xlabel('Time (days)');
 
-        subplot(3,5,13);
+        % Row 3: VEGF–VEGFR2 (Blood, Tumor, Rest)
+        subplot(5,3,7);
+        plot_panel(t_days, VEGFVEGFR2_b_all, lw_ind, lw_mean);
+        title('VEGF–VEGFR2 – Blood');
+        ylabel('[VEGF–VEGFR2]_b (pM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,8);
+        plot_panel(t_days, VEGFVEGFR2_t_all, lw_ind, lw_mean);
+        title('VEGF–VEGFR2 – Tumor');
+        ylabel('[VEGF–VEGFR2]_t (pM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,9);
         plot_panel(t_days, VEGFVEGFR2_r_all, lw_ind, lw_mean);
         title('VEGF–VEGFR2 – Rest of body');
         ylabel('[VEGF–VEGFR2]_r (pM)');
         xlabel('Time (days)');
 
-        subplot(3,5,14);
+        % Row 4: Ab (Blood, Tumor, Rest)
+        subplot(5,3,10);
+        plot_panel(t_days, Ab_b_all, lw_ind, lw_mean);
+        title('Ab – Blood');
+        ylabel('[Ab]_b (pM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,11);
+        plot_panel(t_days, Ab_t_all, lw_ind, lw_mean);
+        title('Ab – Tumor');
+        ylabel('[Ab]_t (pM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,12);
         plot_panel(t_days, Ab_r_all, lw_ind, lw_mean);
         title('Ab – Rest of body');
         ylabel('[Ab]_r (pM)');
         xlabel('Time (days)');
 
-        subplot(3,5,15);
+        % Row 5: VEGF–Ab (Blood, Tumor, Rest)
+        subplot(5,3,13);
+        plot_panel(t_days, VEGFAb_b_all, lw_ind, lw_mean);
+        title('VEGF–Ab – Blood');
+        ylabel('[VEGF–Ab]_b (pM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,14);
+        plot_panel(t_days, VEGFAb_t_all, lw_ind, lw_mean);
+        title('VEGF–Ab – Tumor');
+        ylabel('[VEGF–Ab]_t (pM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,15);
         plot_panel(t_days, VEGFAb_r_all, lw_ind, lw_mean);
         title('VEGF–Ab – Rest of body');
         ylabel('[VEGF–Ab]_r (pM)');
