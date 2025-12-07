@@ -1,23 +1,25 @@
-function task4_popPD
-% Task 4 – Population PD:
-% Vary tumor VEGF and VEGFR2 expression using VirtualPatientsTask4.csv
-% and simulate 100 virtual patients under:
-%   - Single injection (10 mg/kg, once at t = 0)
-%   - Metronomic regimen (1 mg/kg daily × 10 days)
-% For each regimen, run two scenarios:
-%   - No antibody extravasation (AbEx = 0)
-%   - With antibody extravasation (AbEx = 1)
+function task3_population_PK
+% Task 3 – Population PK with 4 regimens/transport scenarios
 %
-% For each of the 4 scenarios, generate one 5x3 multipanel figure:
-%   Rows:   VEGF, VEGFR2, VEGF–VEGFR2, Ab, VEGF–Ab
-%   Cols:   Blood, Tumor, Rest of body
+% Scenarios (each produces a 5x3 population figure):
+%   1) Single injection, NO Ab extravasation
+%   2) Single injection, WITH Ab extravasation
+%   3) Metronomic dosing, WITH Ab extravasation
+%   4) Metronomic dosing, NO Ab extravasation
 %
-% Total: 4 figures × (5*3 panels) = 60 subplots.
+% For each scenario, we simulate 100 virtual patients with variability in:
+%   - kcl_A (Ab clearance), CV = 50%
+%   - kcl_VA (VEGF-Ab clearance), CV = 50%
+%   - Vol_r (rest-of-body volume), CV = 25%
+%
+% Each figure shows 5 molecule types x 3 compartments:
+%   Rows (species): VEGF (pM), Ab (μM), VEGF-Ab (nM), VEGFR2 (pM), VEGF-VEGFR2 (pM)
+%   Cols (compartments): Blood, Tumor, Rest-of-body
 
-    clearvars -except task4_popPD;
+    clearvars -except task3_population_PK;
     clc;
 
-    %% Index mapping (consistent with VEGFAbeqns.m)
+    %% Index mapping for state vector y
     n.VEGF_b        = 1;
     n.VEGFR2_b      = 2;
     n.VEGFVEGFR2_b  = 3;
@@ -36,364 +38,384 @@ function task4_popPD
     n.Ab_r          = 14;
     n.VEGFAb_r      = 15;
 
-    %% Baseline parameters p (same as Tasks 1–2, except AbEx will vary by scenario)
-    p.Vol_b = 5 * 0.60;    % L, plasma volume of blood
-    p.Vol_t = 1 * 0.611;   % L, accessible tumor volume
-    p.Vol_r = 40 * 0.0816; % L, accessible rest-of-body volume
+    %% Baseline parameters
+    p.Vol_b = 5 * 0.60;
+    p.Vol_t = 1 * 0.611;
+    p.Vol_r = 40 * 0.0816;
 
-    % Clearance (min^-1)
     p.kcl_V   = 0.0648;
     p.kcl_VA  = 2.2e-5;
     p.kcl_A   = 2.2e-5;
 
-    % Internalization
     p.kintR2  = 0.0168;
     p.kintVR2 = 0.0168;
 
-    % VEGF production (pM/min)
     p.VEGFprod_b   = 0;
-    p.VEGFprod_t   = 3;   % baseline tumor VEGF production
+    p.VEGFprod_t   = 3;
     p.VEGFprod_r   = 10;
 
-    % VEGFR2 production – baseline from ss conc * kintR2
     p.VEGFR2prod_b = 0;
-    p.VEGFR2prod_t = 2.85e2 * p.kintR2;   % tumor
-    p.VEGFR2prod_r = 2.2e3  * p.kintR2;   % rest of body
+    p.VEGFR2prod_t = 2.85e2 * p.kintR2;
+    p.VEGFR2prod_r = 2.2e3  * p.kintR2;
 
-    % Binding parameters
     p.konVR  = 6e-4;
     p.koffVR = 0.06;
 
     p.konVA  = 5.52e-6;
     p.koffVA = 0.012;
 
-    % Transport parameters
     p.k_bt = 4.12e-4;
     p.k_br = 3.19e-3;
     p.k_tb = 4.12e-4;
     p.k_rb = 3.19e-3 + 6.15e-4;
 
-    % We will overwrite p.AbEx for each scenario (0 or 1)
-    p.AbEx = 1;  % placeholder; irrelevant for steady state (Ab=0)
+    % Default AbEx; will overwrite per scenario
+    p.AbEx = 1;
 
-    %% Dose calculations
-    % Single-injection: 10 mg/kg (70 kg patient)
-    dose10_mg_total   = 10 * 70;          % mg
-    MW_mg_per_mol     = 150000000;        % mg/mol (150 kDa)
-    dose10_mol_total  = dose10_mg_total / MW_mg_per_mol;
-    dose10_pmol_total = dose10_mol_total * 1e12;  % pmol
-    dose10_conc_pM    = dose10_pmol_total / p.Vol_b;
+    %% Dose: 10 mg/kg IV (for single injection and basis for metronomic)
+    dose_mg_total   = 10 * 70;
+    MW_mg_per_mol   = 150000000;
+    dose_mol_total  = dose_mg_total / MW_mg_per_mol;
+    dose_pmol_total = dose_mol_total * 1e12;
+    dose10_conc_pM  = dose_pmol_total / p.Vol_b;   % 10 mg/kg bolus
 
-    % Metronomic: 1 mg/kg daily × 10 days = 1/10 of 10 mg/kg daily
-    dose1_conc_pM = dose10_conc_pM / 10;
+    % Metronomic: 1 mg/kg per day x 10 days (i.e., 1/10 of 10 mg/kg)
+    dose1_conc_pM   = dose10_conc_pM / 10;
 
-    %% First: get steady state without antibody (Ab = 0 everywhere)
-    y0      = zeros(15,1);
-    sstime  = 60 * 24 * 10;       % 10 days to reach steady state
-    tspanSS = 0:1:sstime;         % 1-min steps
+    %% Solver settings (prof's speed suggestions)
+    solver  = @ode15s;
+    options = odeset('MaxStep',5e-1,'AbsTol',1e-5,'RelTol',1e-5,'InitialStep',1e-2);
 
-    solverSS  = @ode15s;
-    optionsSS = odeset('MaxStep',    5e-1, ...
-                       'AbsTol',     1e-5, ...
-                       'RelTol',     1e-5, ...
-                       'InitialStep',1e-2);
+    %% Population definition (same across all scenarios)
+    N_patients = 100;
+    rng(1);
 
-    [~, Yss] = solverSS(@VEGFAbeqns, tspanSS, y0, optionsSS, p, n);
-    y_ss = Yss(end, :).';
+    base_kcl_A  = p.kcl_A;
+    base_kcl_VA = p.kcl_VA;
+    base_Vol_r  = p.Vol_r;
 
-    %% Time settings (same for single and metronomic)
-    n_days_dose_metro = 10;              % daily dosing for 10 days (metronomic only)
-    total_days        = 30;              % simulate out to 30 days
-    minutes_per_day   = 24 * 60;
-    final_time        = total_days * minutes_per_day;
+    kcl_A_samples  = sample_positive_normal(base_kcl_A,  0.5*base_kcl_A,  N_patients);
+    kcl_VA_samples = sample_positive_normal(base_kcl_VA, 0.5*base_kcl_VA, N_patients);
+    Vol_r_samples  = sample_positive_normal(base_Vol_r,  0.25*base_Vol_r, N_patients);
 
-    %% Read virtual patient PD data from CSV (tumor VEGF and VEGFR2 production)
-    vpTable  = readtable('VirtualPatientsTask4.csv');  % relative path
-    varNames = vpTable.Properties.VariableNames;
+    %% Times for steady state and regimens
+    % Steady state (no Ab)
+    tspanSS      = 0:1:(60*24*10);  % 10 days
 
-    idx_VEGF   = find(contains(varNames, 'sVEGF'),   1);
-    idx_VEGFR2 = find(contains(varNames, 'sVEGFR2'), 1);
+    % Single injection: simulate 21 days after dose
+    single_days  = 21;
+    tspan_single = 0:1:(single_days*24*60);
 
-    if isempty(idx_VEGF) || isempty(idx_VEGFR2)
-        error('Could not find sVEGF or sVEGFR2 columns in VirtualPatientsTask4.csv');
-    end
+    % Metronomic: daily dosing for 10 days, simulate total 30 days
+    metro_total_days  = 30;
+    metro_dose_days   = 10;
+    minutes_per_day   = 24*60;
 
-    sVEGF_tumor   = vpTable{:, idx_VEGF};
-    sVEGFR2_tumor = vpTable{:, idx_VEGFR2};
+    %% Get steady-state once (no Ab, AbEx irrelevant since Ab=0)
+    y0_SS = zeros(15,1);
+    [~,Yss] = solver(@VEGFAbeqns, tspanSS, y0_SS, options, p, n);
+    y_ss   = Yss(end, :).';
 
-    nPatients = height(vpTable);
+    %% Define scenarios
+    scenarios = struct([]);
 
-    %% Define the 4 scenarios: regimen × AbEx
-    scenarios = struct( ...
-        'label',   {}, ...
-        'title',   {}, ...
-        'regimen', {}, ...
-        'AbEx',    [] , ...
-        'outfile', {}  );
+    scenarios(1).name      = 'Single injection – No Ab extravasation';
+    scenarios(1).filename  = 'task3_single_noAbEx.png';
+    scenarios(1).regimen   = 'single';
+    scenarios(1).AbEx      = 0;
 
-    scenarios(1).label   = 'single_noAbEx';
-    scenarios(1).title   = 'Single injection (10 mg/kg) – No Ab extravasation';
-    scenarios(1).regimen = 'single';
-    scenarios(1).AbEx    = 0;
-    scenarios(1).outfile = 'task4_popPD_single_noAbEx.png';
+    scenarios(2).name      = 'Single injection – With Ab extravasation';
+    scenarios(2).filename  = 'task3_single_withAbEx.png';
+    scenarios(2).regimen   = 'single';
+    scenarios(2).AbEx      = 1;
 
-    scenarios(2).label   = 'single_withAbEx';
-    scenarios(2).title   = 'Single injection (10 mg/kg) – With Ab extravasation';
-    scenarios(2).regimen = 'single';
-    scenarios(2).AbEx    = 1;
-    scenarios(2).outfile = 'task4_popPD_single_withAbEx.png';
+    scenarios(3).name      = 'Metronomic Treatment – With Ab extravasation';
+    scenarios(3).filename  = 'task3_metro_withAbEx.png';
+    scenarios(3).regimen   = 'metronomic';
+    scenarios(3).AbEx      = 1;
 
-    scenarios(3).label   = 'metronomic_noAbEx';
-    scenarios(3).title   = 'Metronomic (1 mg/kg × 10 days) – No Ab extravasation';
-    scenarios(3).regimen = 'metronomic';
-    scenarios(3).AbEx    = 0;
-    scenarios(3).outfile = 'task4_popPD_metronomic_noAbEx.png';
+    scenarios(4).name      = 'Metronomic Treatment – N Ab extravasation';
+    scenarios(4).filename  = 'task3_metro_noAbEx.png';
+    scenarios(4).regimen   = 'metronomic';
+    scenarios(4).AbEx      = 0;
 
-    scenarios(4).label   = 'metronomic_withAbEx';
-    scenarios(4).title   = 'Metronomic (1 mg/kg × 10 days) – With Ab extravasation';
-    scenarios(4).regimen = 'metronomic';
-    scenarios(4).AbEx    = 1;
-    scenarios(4).outfile = 'task4_popPD_metronomic_withAbEx.png';
+    %% Loop over scenarios
+    for s = 1:numel(scenarios)
+        disp(['Running scenario: ', scenarios(s).name]);
 
-    %% Line style settings
-    lw_ind  = 0.4;   % individual patients
-    lw_mean = 2.0;   % population mean
+        % Common parameter template for this scenario
+        p_s = p;
+        p_s.AbEx = scenarios(s).AbEx;
 
-    %% Loop over each scenario and generate one 5x3 figure
-    for sIdx = 1:numel(scenarios)
-        scn = scenarios(sIdx);
-        fprintf('Running scenario %d/%d: %s\n', sIdx, numel(scenarios), scn.label);
+        %-------------------------------
+        % Run first patient (ip=1) to define time grid & sizes
+        %-------------------------------
+        p_first = p_s;
+        p_first.kcl_A  = kcl_A_samples(1);
+        p_first.kcl_VA = kcl_VA_samples(1);
+        p_first.Vol_r  = Vol_r_samples(1);
 
-        % Scenario-specific parameters
-        p_scn        = p;
-        p_scn.AbEx   = scn.AbEx;
-
-        % --- First patient (to define common time grid) ---
-        p_first = p_scn;
-        p_first.VEGFprod_t   = sVEGF_tumor(1);              % pM/min directly
-        p_first.VEGFR2prod_t = sVEGFR2_tumor(1) * p.kintR2; % ss conc * kintR2
-
-        [T_base, Y_base] = run_regimen_for_p( ...
-            p_first, y_ss, minutes_per_day, final_time, n, ...
-            dose10_conc_pM, dose1_conc_pM, n_days_dose_metro, scn.regimen);
+        [T_base, Y_base] = simulate_regimen( ...
+            scenarios(s).regimen, ...
+            p_first, y_ss, ...
+            solver, options, ...
+            dose10_conc_pM, dose1_conc_pM, ...
+            tspan_single, ...
+            metro_dose_days, metro_total_days, minutes_per_day, n);
 
         nTime  = numel(T_base);
-        t_days = T_base / (60*24);
+        t_days = T_base/(60*24);
 
-        % --- Preallocate: all 5 molecules × 3 compartments ---
-        VEGF_b_all       = zeros(nTime, nPatients);
-        VEGF_t_all       = zeros(nTime, nPatients);
-        VEGF_r_all       = zeros(nTime, nPatients);
+        % Preallocate for this scenario
+        VEGF_b_all        = zeros(nTime,N_patients);
+        VEGF_t_all        = zeros(nTime,N_patients);
+        VEGF_r_all        = zeros(nTime,N_patients);
 
-        VEGFR2_b_all     = zeros(nTime, nPatients);
-        VEGFR2_t_all     = zeros(nTime, nPatients);
-        VEGFR2_r_all     = zeros(nTime, nPatients);
+        VEGFR2_b_all      = zeros(nTime,N_patients);
+        VEGFR2_t_all      = zeros(nTime,N_patients);
+        VEGFR2_r_all      = zeros(nTime,N_patients);
 
-        VEGFVEGFR2_b_all = zeros(nTime, nPatients);
-        VEGFVEGFR2_t_all = zeros(nTime, nPatients);
-        VEGFVEGFR2_r_all = zeros(nTime, nPatients);
+        VEGFVEGFR2_b_all  = zeros(nTime,N_patients);
+        VEGFVEGFR2_t_all  = zeros(nTime,N_patients);
+        VEGFVEGFR2_r_all  = zeros(nTime,N_patients);
 
-        Ab_b_all         = zeros(nTime, nPatients);
-        Ab_t_all         = zeros(nTime, nPatients);
-        Ab_r_all         = zeros(nTime, nPatients);
+        Ab_b_all          = zeros(nTime,N_patients);
+        Ab_t_all          = zeros(nTime,N_patients);
+        Ab_r_all          = zeros(nTime,N_patients);
 
-        VEGFAb_b_all     = zeros(nTime, nPatients);
-        VEGFAb_t_all     = zeros(nTime, nPatients);
-        VEGFAb_r_all     = zeros(nTime, nPatients);
+        VEGFAb_b_all      = zeros(nTime,N_patients);
+        VEGFAb_t_all      = zeros(nTime,N_patients);
+        VEGFAb_r_all      = zeros(nTime,N_patients);
 
-        % Fill arrays for first patient
-        VEGF_b_all(:,1)       = Y_base(:, n.VEGF_b);
-        VEGF_t_all(:,1)       = Y_base(:, n.VEGF_t);
-        VEGF_r_all(:,1)       = Y_base(:, n.VEGF_r);
+        % Fill in first patient
+        VEGF_b_all(:,1)       = Y_base(:,n.VEGF_b);
+        VEGF_t_all(:,1)       = Y_base(:,n.VEGF_t);
+        VEGF_r_all(:,1)       = Y_base(:,n.VEGF_r);
 
-        VEGFR2_b_all(:,1)     = Y_base(:, n.VEGFR2_b);
-        VEGFR2_t_all(:,1)     = Y_base(:, n.VEGFR2_t);
-        VEGFR2_r_all(:,1)     = Y_base(:, n.VEGFR2_r);
+        VEGFR2_b_all(:,1)     = Y_base(:,n.VEGFR2_b);
+        VEGFR2_t_all(:,1)     = Y_base(:,n.VEGFR2_t);
+        VEGFR2_r_all(:,1)     = Y_base(:,n.VEGFR2_r);
 
-        VEGFVEGFR2_b_all(:,1) = Y_base(:, n.VEGFVEGFR2_b);
-        VEGFVEGFR2_t_all(:,1) = Y_base(:, n.VEGFVEGFR2_t);
-        VEGFVEGFR2_r_all(:,1) = Y_base(:, n.VEGFVEGFR2_r);
+        VEGFVEGFR2_b_all(:,1) = Y_base(:,n.VEGFVEGFR2_b);
+        VEGFVEGFR2_t_all(:,1) = Y_base(:,n.VEGFVEGFR2_t);
+        VEGFVEGFR2_r_all(:,1) = Y_base(:,n.VEGFVEGFR2_r);
 
-        Ab_b_all(:,1)         = Y_base(:, n.Ab_b);
-        Ab_t_all(:,1)         = Y_base(:, n.Ab_t);
-        Ab_r_all(:,1)         = Y_base(:, n.Ab_r);
+        Ab_b_all(:,1)         = Y_base(:,n.Ab_b);
+        Ab_t_all(:,1)         = Y_base(:,n.Ab_t);
+        Ab_r_all(:,1)         = Y_base(:,n.Ab_r);
 
-        VEGFAb_b_all(:,1)     = Y_base(:, n.VEGFAb_b);
-        VEGFAb_t_all(:,1)     = Y_base(:, n.VEGFAb_t);
-        VEGFAb_r_all(:,1)     = Y_base(:, n.VEGFAb_r);
+        VEGFAb_b_all(:,1)     = Y_base(:,n.VEGFAb_b);
+        VEGFAb_t_all(:,1)     = Y_base(:,n.VEGFAb_t);
+        VEGFAb_r_all(:,1)     = Y_base(:,n.VEGFAb_r);
 
-        % --- Remaining patients in parallel ---
-        parfor i = 2:nPatients
-            p_i = p_scn;
-            p_i.VEGFprod_t   = sVEGF_tumor(i);
-            p_i.VEGFR2prod_t = sVEGFR2_tumor(i) * p.kintR2;
+        %-------------------------------
+        % Remaining patients in parallel
+        %-------------------------------
+        parfor ip = 2:N_patients
+            p_i = p_s;
+            p_i.kcl_A  = kcl_A_samples(ip);
+            p_i.kcl_VA = kcl_VA_samples(ip);
+            p_i.Vol_r  = Vol_r_samples(ip);
 
-            [T_i, Y_i] = run_regimen_for_p( ...
-                p_i, y_ss, minutes_per_day, final_time, n, ...
-                dose10_conc_pM, dose1_conc_pM, n_days_dose_metro, scn.regimen);
+            [T_i, Y_i] = simulate_regimen( ...
+                scenarios(s).regimen, ...
+                p_i, y_ss, ...
+                solver, options, ...
+                dose10_conc_pM, dose1_conc_pM, ...
+                tspan_single, ...
+                metro_dose_days, metro_total_days, minutes_per_day, n);
 
-            % assume T_i matches T_base (same regimen and time grid)
-            VEGF_b_all(:,i)       = Y_i(:, n.VEGF_b);
-            VEGF_t_all(:,i)       = Y_i(:, n.VEGF_t);
-            VEGF_r_all(:,i)       = Y_i(:, n.VEGF_r);
+            % Assume T_i == T_base in grid
+            VEGF_b_all(:,ip)       = Y_i(:,n.VEGF_b);
+            VEGF_t_all(:,ip)       = Y_i(:,n.VEGF_t);
+            VEGF_r_all(:,ip)       = Y_i(:,n.VEGF_r);
 
-            VEGFR2_b_all(:,i)     = Y_i(:, n.VEGFR2_b);
-            VEGFR2_t_all(:,i)     = Y_i(:, n.VEGFR2_t);
-            VEGFR2_r_all(:,i)     = Y_i(:, n.VEGFR2_r);
+            VEGFR2_b_all(:,ip)     = Y_i(:,n.VEGFR2_b);
+            VEGFR2_t_all(:,ip)     = Y_i(:,n.VEGFR2_t);
+            VEGFR2_r_all(:,ip)     = Y_i(:,n.VEGFR2_r);
 
-            VEGFVEGFR2_b_all(:,i) = Y_i(:, n.VEGFVEGFR2_b);
-            VEGFVEGFR2_t_all(:,i) = Y_i(:, n.VEGFVEGFR2_t);
-            VEGFVEGFR2_r_all(:,i) = Y_i(:, n.VEGFVEGFR2_r);
+            VEGFVEGFR2_b_all(:,ip) = Y_i(:,n.VEGFVEGFR2_b);
+            VEGFVEGFR2_t_all(:,ip) = Y_i(:,n.VEGFVEGFR2_t);
+            VEGFVEGFR2_r_all(:,ip) = Y_i(:,n.VEGFVEGFR2_r);
 
-            Ab_b_all(:,i)         = Y_i(:, n.Ab_b);
-            Ab_t_all(:,i)         = Y_i(:, n.Ab_t);
-            Ab_r_all(:,i)         = Y_i(:, n.Ab_r);
+            Ab_b_all(:,ip)         = Y_i(:,n.Ab_b);
+            Ab_t_all(:,ip)         = Y_i(:,n.Ab_t);
+            Ab_r_all(:,ip)         = Y_i(:,n.Ab_r);
 
-            VEGFAb_b_all(:,i)     = Y_i(:, n.VEGFAb_b);
-            VEGFAb_t_all(:,i)     = Y_i(:, n.VEGFAb_t);
-            VEGFAb_r_all(:,i)     = Y_i(:, n.VEGFAb_r);
+            VEGFAb_b_all(:,ip)     = Y_i(:,n.VEGFAb_b);
+            VEGFAb_t_all(:,ip)     = Y_i(:,n.VEGFAb_t);
+            VEGFAb_r_all(:,ip)     = Y_i(:,n.VEGFAb_r);
         end
 
-        %% === Plot: 5 (molecules) × 3 (compartments) multipanel ===
+        %-------------------------------
+        % Build 5x3 figure for this scenario
+        %-------------------------------
         fig = figure('Visible','off');
-        fig.Position = [100 100 1600 1000];
+        set(fig,'Position',[100 50 1400 1000]);
 
-        % Row 1: VEGF (Blood, Tumor, Rest)
+        lw_ind  = 0.4;
+        lw_mean = 2;
+
+        % ---- Row 1: VEGF (pM, y-lim [0 220]) ----
         subplot(5,3,1);
-        plot_panel(t_days, VEGF_b_all, lw_ind, lw_mean);
+        hold on;
+        plot(t_days, VEGF_b_all,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGF_b_all,2),'k','LineWidth',lw_mean);
+        ylim([0 220]);
         title('VEGF – Blood');
         ylabel('[VEGF]_b (pM)');
         xlabel('Time (days)');
 
         subplot(5,3,2);
-        plot_panel(t_days, VEGF_t_all, lw_ind, lw_mean);
+        hold on;
+        plot(t_days, VEGF_t_all,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGF_t_all,2),'k','LineWidth',lw_mean);
+        ylim([0 220]);
         title('VEGF – Tumor');
         ylabel('[VEGF]_t (pM)');
         xlabel('Time (days)');
 
         subplot(5,3,3);
-        plot_panel(t_days, VEGF_r_all, lw_ind, lw_mean);
-        title('VEGF – Rest of body');
+        hold on;
+        plot(t_days, VEGF_r_all,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGF_r_all,2),'k','LineWidth',lw_mean);
+        ylim([0 220]);
+        title('VEGF – Rest of Body');
         ylabel('[VEGF]_r (pM)');
         xlabel('Time (days)');
 
-        % Row 2: VEGFR2 (Blood, Tumor, Rest)
+        % ---- Row 2: Ab (μM) ----
         subplot(5,3,4);
-        plot_panel(t_days, VEGFR2_b_all, lw_ind, lw_mean);
+        hold on;
+        plot(t_days, Ab_b_all/1e6,'LineWidth',lw_ind);
+        plot(t_days, mean(Ab_b_all,2)/1e6,'k','LineWidth',lw_mean);
+        title('Ab – Blood');
+        ylabel('[Ab]_b (\muM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,5);
+        hold on;
+        plot(t_days, Ab_t_all/1e6,'LineWidth',lw_ind);
+        plot(t_days, mean(Ab_t_all,2)/1e6,'k','LineWidth',lw_mean);
+        title('Ab – Tumor');
+        ylabel('[Ab]_t (\muM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,6);
+        hold on;
+        plot(t_days, Ab_r_all/1e6,'LineWidth',lw_ind);
+        plot(t_days, mean(Ab_r_all,2)/1e6,'k','LineWidth',lw_mean);
+        title('Ab – Rest of Body');
+        ylabel('[Ab]_r (\muM)');
+        xlabel('Time (days)');
+
+        % ---- Row 3: VEGF–Ab (nM) ----
+        subplot(5,3,7);
+        hold on;
+        plot(t_days, VEGFAb_b_all/1000,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGFAb_b_all,2)/1000,'k','LineWidth',lw_mean);
+        title('VEGF–Ab – Blood');
+        ylabel('[VEGF–Ab]_b (nM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,8);
+        hold on;
+        plot(t_days, VEGFAb_t_all/1000,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGFAb_t_all,2)/1000,'k','LineWidth',lw_mean);
+        title('VEGF–Ab – Tumor');
+        ylabel('[VEGF–Ab]_t (nM)');
+        xlabel('Time (days)');
+
+        subplot(5,3,9);
+        hold on;
+        plot(t_days, VEGFAb_r_all/1000,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGFAb_r_all,2)/1000,'k','LineWidth',lw_mean);
+        title('VEGF–Ab – Rest of Body');
+        ylabel('[VEGF–Ab]_r (nM)');
+        xlabel('Time (days)');
+
+        % ---- Row 4: VEGFR2 (pM) ----
+        subplot(5,3,10);
+        hold on;
+        plot(t_days, VEGFR2_b_all,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGFR2_b_all,2),'k','LineWidth',lw_mean);
         title('VEGFR2 – Blood');
         ylabel('[VEGFR2]_b (pM)');
         xlabel('Time (days)');
 
-        subplot(5,3,5);
-        plot_panel(t_days, VEGFR2_t_all, lw_ind, lw_mean);
+        subplot(5,3,11);
+        hold on;
+        plot(t_days, VEGFR2_t_all,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGFR2_t_all,2),'k','LineWidth',lw_mean);
         title('VEGFR2 – Tumor');
         ylabel('[VEGFR2]_t (pM)');
         xlabel('Time (days)');
 
-        subplot(5,3,6);
-        plot_panel(t_days, VEGFR2_r_all, lw_ind, lw_mean);
-        title('VEGFR2 – Rest of body');
+        subplot(5,3,12);
+        hold on;
+        plot(t_days, VEGFR2_r_all,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGFR2_r_all,2),'k','LineWidth',lw_mean);
+        title('VEGFR2 – Rest of Body');
         ylabel('[VEGFR2]_r (pM)');
         xlabel('Time (days)');
 
-        % Row 3: VEGF–VEGFR2 (Blood, Tumor, Rest)
-        subplot(5,3,7);
-        plot_panel(t_days, VEGFVEGFR2_b_all, lw_ind, lw_mean);
+        % ---- Row 5: VEGF–VEGFR2 (pM) ----
+        subplot(5,3,13);
+        hold on;
+        plot(t_days, VEGFVEGFR2_b_all,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGFVEGFR2_b_all,2),'k','LineWidth',lw_mean);
         title('VEGF–VEGFR2 – Blood');
         ylabel('[VEGF–VEGFR2]_b (pM)');
         xlabel('Time (days)');
 
-        subplot(5,3,8);
-        plot_panel(t_days, VEGFVEGFR2_t_all, lw_ind, lw_mean);
+        subplot(5,3,14);
+        hold on;
+        plot(t_days, VEGFVEGFR2_t_all,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGFVEGFR2_t_all,2),'k','LineWidth',lw_mean);
         title('VEGF–VEGFR2 – Tumor');
         ylabel('[VEGF–VEGFR2]_t (pM)');
         xlabel('Time (days)');
 
-        subplot(5,3,9);
-        plot_panel(t_days, VEGFVEGFR2_r_all, lw_ind, lw_mean);
-        title('VEGF–VEGFR2 – Rest of body');
+        subplot(5,3,15);
+        hold on;
+        plot(t_days, VEGFVEGFR2_r_all,'LineWidth',lw_ind);
+        plot(t_days, mean(VEGFVEGFR2_r_all,2),'k','LineWidth',lw_mean);
+        title('VEGF–VEGFR2 – Rest of Body');
         ylabel('[VEGF–VEGFR2]_r (pM)');
         xlabel('Time (days)');
 
-        % Row 4: Ab (Blood, Tumor, Rest)
-        subplot(5,3,10);
-        plot_panel(t_days, Ab_b_all, lw_ind, lw_mean);
-        title('Ab – Blood');
-        ylabel('[Ab]_b (pM)');
-        xlabel('Time (days)');
+        sgtitle(['Task 3 - PopPK ', scenarios(s).name]);
 
-        subplot(5,3,11);
-        plot_panel(t_days, Ab_t_all, lw_ind, lw_mean);
-        title('Ab – Tumor');
-        ylabel('[Ab]_t (pM)');
-        xlabel('Time (days)');
-
-        subplot(5,3,12);
-        plot_panel(t_days, Ab_r_all, lw_ind, lw_mean);
-        title('Ab – Rest of body');
-        ylabel('[Ab]_r (pM)');
-        xlabel('Time (days)');
-
-        % Row 5: VEGF–Ab (Blood, Tumor, Rest)
-        subplot(5,3,13);
-        plot_panel(t_days, VEGFAb_b_all, lw_ind, lw_mean);
-        title('VEGF–Ab – Blood');
-        ylabel('[VEGF–Ab]_b (pM)');
-        xlabel('Time (days)');
-
-        subplot(5,3,14);
-        plot_panel(t_days, VEGFAb_t_all, lw_ind, lw_mean);
-        title('VEGF–Ab – Tumor');
-        ylabel('[VEGF–Ab]_t (pM)');
-        xlabel('Time (days)');
-
-        subplot(5,3,15);
-        plot_panel(t_days, VEGFAb_r_all, lw_ind, lw_mean);
-        title('VEGF–Ab – Rest of body');
-        ylabel('[VEGF–Ab]_r (pM)');
-        xlabel('Time (days)');
-
-        sgtitle(sprintf('Task 4 – PopPD: %s', scn.title));
-
-        % Save figure for this scenario
-        saveas(fig, scn.outfile);
+        saveas(fig, scenarios(s).filename);
         close(fig);
     end
-
-    fprintf('Task 4 PopPD: Completed all 4 scenarios.\n');
 end
 
-% =====================================================================
-% Subfunction: run one regimen for a given parameter set p_local
-% =====================================================================
-function [T_all, Y_all] = run_regimen_for_p( ...
-    p_local, y_ss, minutes_per_day, final_time, n, ...
-    dose10_conc_pM, dose1_conc_pM, n_days_metro, regimenType)
-
-    solver  = @ode15s;
-    options = odeset('MaxStep',    5e-1, ...
-                     'AbsTol',     1e-5, ...
-                     'RelTol',     1e-5, ...
-                     'InitialStep',1e-2);
-
-    y_curr = y_ss;
-    t_curr = 0;
-
-    T_all = [];
-    Y_all = [];
-
-    switch lower(regimenType)
+%% Helper: simulate given regimen for one patient
+function [T_all, Y_all] = simulate_regimen(regimen, p_local, y_ss, ...
+                                           solver, options, ...
+                                           dose10_conc_pM, dose1_conc_pM, ...
+                                           tspan_single, ...
+                                           metro_dose_days, metro_total_days, ...
+                                           minutes_per_day, n)
+    switch lower(regimen)
         case 'single'
-            % Single 10 mg/kg bolus at t = 0
-            y_curr(n.Ab_b) = y_curr(n.Ab_b) + dose10_conc_pM;
-
-            tspan = t_curr:1:final_time;
-            [T_all, Y_all] = solver(@VEGFAbeqns, tspan, y_curr, options, p_local, n);
+            % Single 10 mg/kg bolus at t = 0, simulate 21 days
+            y0 = y_ss;
+            y0(n.Ab_b) = y0(n.Ab_b) + dose10_conc_pM;
+            [T_all, Y_all] = solver(@VEGFAbeqns, tspan_single, y0, options, p_local, n);
 
         case 'metronomic'
-            % Daily 1 mg/kg bolus for n_days_metro, then tail with no further doses
-            for d = 1:n_days_metro
-                % Give that day's dose into blood
+            % 1 mg/kg equivalent per day x metro_dose_days, total metro_total_days
+            y_curr = y_ss;
+            t_curr = 0;
+
+            T_all = [];
+            Y_all = [];
+
+            % Dosing phase
+            for d = 1:metro_dose_days
+                % dose for this day
                 y_curr(n.Ab_b) = y_curr(n.Ab_b) + dose1_conc_pM;
 
                 tspan_day = t_curr:1:(t_curr + minutes_per_day);
@@ -411,7 +433,8 @@ function [T_all, Y_all] = run_regimen_for_p( ...
                 y_curr = Y_day(end, :).';
             end
 
-            % Tail phase: no further doses, simulate until final_time
+            % Tail phase after last dose
+            final_time = metro_total_days * minutes_per_day;
             if t_curr < final_time
                 tspan_tail = t_curr:1:final_time;
                 [T_tail, Y_tail] = solver(@VEGFAbeqns, tspan_tail, y_curr, options, p_local, n);
@@ -420,17 +443,18 @@ function [T_all, Y_all] = run_regimen_for_p( ...
             end
 
         otherwise
-            error('Unknown regimenType: %s', regimenType);
+            error('Unknown regimen: %s', regimen);
     end
 end
 
-% =====================================================================
-% Subfunction: plotting helper for each panel
-% =====================================================================
-function plot_panel(t_days, data_all, lw_ind, lw_mean)
-    hold on;
-    plot(t_days, data_all, 'LineWidth', lw_ind);
-    plot(t_days, mean(data_all, 2), 'k', 'LineWidth', lw_mean);
-    hold off;
-    box on;
+%% Helper: sample from N(mu,sigma) but truncated at > 0
+function vals = sample_positive_normal(mu,sigma,N)
+    vals = zeros(N,1);
+    for i = 1:N
+        v = -1;
+        while v <= 0
+            v = normrnd(mu, sigma);
+        end
+        vals(i) = v;
+    end
 end
